@@ -37,6 +37,29 @@ The server holds the cache, collision data and world state in memory.
 
 Oracle's free tier works well, with one important caveat about which shape you pick.
 
+### The short version
+
+Two things must happen in the Oracle web console — nothing outside your tenancy
+can do them for you:
+
+1. Create the instance as **VM.Standard.A1.Flex** (see [below](#pick-the-right-shape))
+2. Add VCN ingress rules for **TCP 80 and 443** (see [below](#open-the-firewall-both-of-them))
+
+Then point a domain at the instance's public IP and, over SSH, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ponch-TV/xrsps-typescript/claude/osrs-wow-conversion-60s94z/scripts/bootstrap-oracle.sh \
+    | bash -s -- game.example.com you@example.com
+```
+
+That opens the instance's local firewall, installs Docker, clones the repo,
+writes `.env.deploy`, builds, and waits until the server reports ready. It
+refuses to start on the 1GB shape and tells you if DNS is not pointing here yet.
+Re-running it is safe.
+
+The rest of this section is what that script does, in case you would rather do
+it by hand or something goes wrong.
+
 ### Pick the right shape
 
 | Shape                   | Free tier            | Verdict                                    |
