@@ -35,6 +35,18 @@ yarn dev
 
 See [docs/setup.md](docs/setup.md) for details.
 
+## Deploying
+
+The client is a static bundle; the game server is a long-lived WebSocket process
+that also serves the OSRS cache to players. To put both on the internet:
+
+```bash
+cp .env.deploy.example .env.deploy   # set GAME_DOMAIN + TLS_EMAIL
+docker compose --env-file .env.deploy up -d --build
+```
+
+See [docs/deploy.md](docs/deploy.md) — includes an Oracle Cloud Always Free walkthrough.
+
 ---
 
 Fan project. Not affiliated with, endorsed by, or connected to Jagex Ltd.

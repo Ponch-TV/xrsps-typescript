@@ -1,0 +1,64 @@
+# Production stack for the game server.
+#
+# Caddy terminates TLS and reverse-proxies everything to the game server, so a
+# single public port (443) carries all three things the browser client needs:
+#
+#   wss://HOST/         game protocol (Caddy upgrades WebSockets automatically)
+#   https://HOST/caches/  OSRS cache download
+#   https://HOST/status   player count shown on the login server list
+#
+# TLS matters: the client is served over HTTPS from Vercel, and browsers refuse
+# a plaintext ws:// connection from an HTTPS page.
+#
+#   cp .env.deploy.example .env.deploy && $EDITOR .env.deploy
+#   docker compose --env-file .env.deploy up -d --build
+#
+# First boot downloads the cache and builds collision data (10-20 min) into
+# named volumes; later restarts are immediate.
+
+services:
+    game:
+        build:
+            context: .
+            dockerfile: server/Dockerfile
+        restart: unless-stopped
+        environment:
+            GAMEMODE: ${GAMEMODE:-vanilla}
+            SERVER_NAME: ${SERVER_NAME:-xRSPS}
+            HOST: 0.0.0.0
+            PORT: 43594
+            LOG_LEVEL: ${LOG_LEVEL:-info}
+            # Set false once your characters exist to stop new signups.
+            ALLOW_ACCOUNT_REGISTRATION: ${ALLOW_ACCOUNT_REGISTRATION:-true}
+        volumes:
+            - osrs-cache:/app/server/caches
+            - collision-cache:/app/server/cache
+            - player-data:/app/server/data
+        # Not published to the host: only Caddy should reach it directly.
+        expose:
+            - "43594"
+
+    caddy:
+        image: caddy:2-alpine
+        restart: unless-stopped
+        depends_on:
+            - game
+        ports:
+            - "80:80"
+            - "443:443"
+        environment:
+            # The hostname you point at this box. Caddy gets a Let's Encrypt
+            # cert for it automatically on first request.
+            GAME_DOMAIN: ${GAME_DOMAIN:?set GAME_DOMAIN in .env.deploy}
+            TLS_EMAIL: ${TLS_EMAIL:-}
+        volumes:
+            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+            - caddy-data:/data
+            - caddy-config:/config
+
+volumes:
+    osrs-cache:
+    collision-cache:
+    player-data:
+    caddy-data:
+    caddy-config:

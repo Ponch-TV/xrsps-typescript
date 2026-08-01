@@ -1,0 +1,22 @@
+# Keep the build context small — the cache and collision data are produced on a
+# volume at first boot, not shipped in the image.
+.git
+.github
+docs
+**/node_modules
+client/build
+server/caches
+server/cache
+server/data/gamemodes/*/game.sqlite*
+server/data/gamemodes/*/player-state.json
+server/data/gamemodes/*/accounts.json
+server/data/sources
+tmp
+.tmp
+logs
+.env*
+!.env.example
+.vercel
+references
+toolkit
+mcp

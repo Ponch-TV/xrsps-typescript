@@ -108,6 +108,7 @@ import { TickPhaseOrchestrator } from "../game/tick";
 import { GameTicker } from "../game/ticker";
 import { TradeManager } from "../game/trade/TradeManager";
 import { PathService } from "../pathfinding/PathService";
+import { serverPath } from "../paths";
 import { logger } from "../utils/logger";
 import { InterfaceService } from "../widgets/InterfaceService";
 import type { WidgetAction } from "../widgets/WidgetManager";
@@ -144,6 +145,7 @@ import {
     VarBroadcaster,
     WidgetBroadcaster,
 } from "./broadcast";
+import { tryCreateCacheRequestHandler } from "./cacheHttp";
 import { NpcPacketEncoder, PlayerPacketEncoder } from "./encoding";
 import { encodeAppearanceBinary } from "./encoding/AppearanceEncoder";
 import { WorldEntityInfoEncoder } from "./encoding/WorldEntityInfoEncoder";
@@ -598,6 +600,11 @@ export class WSServer {
                 concurrencyLimit: 10,
             },
         });
+        // Serving the cache here (rather than from a second process) keeps
+        // production to one hostname and one port, which is all most container
+        // hosts expose. Dev is unaffected: CRA serves /caches itself.
+        const serveCache = tryCreateCacheRequestHandler(serverPath("caches"));
+
         this.wss.on("listening", () => {
             logger.info(`WS listening on ws://${opts.host}:${opts.port}`);
 
@@ -607,6 +614,9 @@ export class WSServer {
                 httpServer.on(
                     "request",
                     (req: import("http").IncomingMessage, res: import("http").ServerResponse) => {
+                        if (serveCache?.(req, res)) {
+                            return;
+                        }
                         if (req.url === "/status") {
                             const count = this.players?.getRealPlayerCount() ?? 0;
                             res.writeHead(200, {

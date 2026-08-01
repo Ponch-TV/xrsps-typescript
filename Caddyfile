@@ -1,0 +1,24 @@
+# TLS front door for the game server. See docker-compose.yml.
+#
+# Caddy proxies WebSocket upgrades transparently, so one reverse_proxy covers
+# all three things the client needs from this host: the game protocol at `/`,
+# the cache download at `/caches/*`, and the player count at `/status`.
+{
+	email {$TLS_EMAIL}
+}
+
+{$GAME_DOMAIN} {
+	# Skip the cache: it is already-compressed binary, so re-encoding ~200MB per
+	# new player costs CPU and saves nothing.
+	@compressible not path /caches/*
+	encode @compressible zstd gzip
+
+	reverse_proxy game:43594 {
+		# A tick is 600ms and an idle player can send nothing for minutes.
+		# Without this the proxy drops healthy game connections.
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+}
