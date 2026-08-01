@@ -1,20 +1,24 @@
 # Deployment Guide
 
-Running xRSPS for real means two separate things:
+xRSPS is two pieces: a **static client** (React/WebGL bundle, ~24MB) and a
+**game server** (long-lived Node process on a 600ms tick, WebSocket). The server
+also serves the **OSRS cache** — ~195MB every new player downloads once.
 
-| Piece           | What it is                                     | Where it goes                       |
-| --------------- | ---------------------------------------------- | ----------------------------------- |
-| **Client**      | Static React/WebGL bundle, a few MB            | Any static host (Vercel, Pages, S3) |
-| **Game server** | Long-lived Node process, 600ms tick, WebSocket | A VPS or container host             |
+The Compose stack in this repo puts all of it behind one hostname:
 
-The game server also serves the **OSRS cache** (~195MB) over HTTP at `/caches/`,
-so players downloading the cache and players connecting to the world hit the
-same hostname. That keeps the deployment to one box and one certificate.
+| URL                    | Served by                               |
+| ---------------------- | --------------------------------------- |
+| `https://HOST/`        | the game client                         |
+| `wss://HOST/`          | game protocol                           |
+| `https://HOST/caches/` | OSRS cache download                     |
+| `https://HOST/status`  | player count, shown on the login screen |
 
-> The client is served over HTTPS, and browsers refuse a plaintext `ws://`
-> connection from an HTTPS page. The game server **must** be reachable over
-> `wss://`, which means a real domain and a certificate. The Compose stack below
-> handles that with Caddy.
+One hostname means one certificate and no CORS to configure. You can host the
+client separately instead — see [Hosting the client elsewhere](#hosting-the-client-elsewhere).
+
+> **TLS is required, not optional.** Browsers refuse a plaintext `ws://`
+> connection from an HTTPS page, so the game server has to be reachable over
+> `wss://` — which means a real domain and a certificate. Caddy handles both.
 
 ---
 
@@ -22,11 +26,12 @@ same hostname. That keeps the deployment to one box and one certificate.
 
 The server holds the cache, collision data and world state in memory.
 
-| Resource | Needs                                                     |
-| -------- | --------------------------------------------------------- |
-| RAM      | **~800MB idle with zero players.** Give it 2GB+.          |
-| Disk     | ~500MB (195MB cache + 270MB collision) plus player saves. |
-| CPU      | 1 core is enough to boot; 2+ keeps the tick comfortable.  |
+| Resource | Needs                                                                                |
+| -------- | ------------------------------------------------------------------------------------ |
+| RAM      | **~800MB idle with zero players.** Give it 2GB+.                                     |
+| Disk     | ~500MB (195MB cache + 270MB collision) plus player saves.                            |
+| CPU      | 1 core is enough to boot; 2+ keeps the tick comfortable.                             |
+| Build    | The client bundle needs ~4GB RAM to compile. Building on the box is fine on A1.Flex. |
 
 ## Oracle Cloud (Always Free)
 
@@ -107,11 +112,12 @@ $EDITOR .env.deploy          # set GAME_DOMAIN and TLS_EMAIL
 docker compose --env-file .env.deploy up -d --build
 ```
 
-**First boot takes 10–20 minutes.** The container downloads the OSRS cache and
-builds collision data for 2,869 map regions into Docker volumes. Watch it:
+**First boot takes 10–20 minutes.** It compiles the client bundle, downloads the
+OSRS cache, and builds collision data for 2,869 map regions into Docker volumes.
+Watch it:
 
 ```bash
-docker compose logs -f game
+docker compose --env-file .env.deploy logs -f game
 ```
 
 Wait for `WS listening on ws://0.0.0.0:43594`. Restarts after that are immediate
@@ -127,14 +133,22 @@ curl -sI https://game.example.com/caches/caches.json
 # HTTP/2 200 ... access-control-allow-origin: *
 ```
 
-If `/status` answers, `wss://` will work — same port, same certificate.
+If `/status` answers, `wss://` will work — same port, same certificate. Then open
+`https://game.example.com` and log in. The first visit downloads the ~195MB cache
+into browser storage; later visits skip it.
+
+Log in with any username and a password of 8–20 characters. The first successful
+login registers that username.
 
 ---
 
-## Client
+## Hosting the client elsewhere
 
-The client reads its server and cache locations from build-time `REACT_APP_*`
-variables. Create React App inlines these **at build time**, so changing one
+Serving the client from the same box needs no configuration: the client's
+built-in `/caches/` default already resolves to the game server.
+
+To put the client on a CDN instead, it needs to be told where the game lives.
+Create React App inlines `REACT_APP_*` **at build time**, so each of these
 requires a rebuild, not just a restart.
 
 | Variable                           | Value                              |
@@ -145,11 +159,14 @@ requires a rebuild, not just a restart.
 | `REACT_APP_DEFAULT_SERVER_NAME`    | `xRSPS`                            |
 | `REACT_APP_DEFAULT_SERVER_SECURE`  | `true`                             |
 
+Cross-origin is fine — the cache endpoint sends `Access-Control-Allow-Origin: *`
+and supports the range requests the resumable download needs.
+
 ### Vercel
 
-The repo root `vercel.json` already points the build at `client/`. Set the
-variables above in Project → Settings → Environment Variables, then deploy.
-Every push to the production branch rebuilds.
+The repo root `vercel.json` already points the build at `client/`. Import the
+repo, set the variables above in Project → Settings → Environment Variables, and
+deploy. Every push to the production branch rebuilds.
 
 ### Anywhere else
 
@@ -162,6 +179,9 @@ CI=false yarn build
 
 Serve the resulting `client/build/` as a static site with an SPA fallback
 rewriting unknown paths to `/index.html`.
+
+If you go this route the `caddy` service still works — it just serves a copy of
+the client nobody visits. Point your CDN's variables at the same `GAME_DOMAIN`.
 
 ---
 

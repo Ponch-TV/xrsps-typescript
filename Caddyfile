@@ -1,8 +1,14 @@
-# TLS front door for the game server. See docker-compose.yml.
+# TLS front door. See docker-compose.yml.
 #
-# Caddy proxies WebSocket upgrades transparently, so one reverse_proxy covers
-# all three things the client needs from this host: the game protocol at `/`,
-# the cache download at `/caches/*`, and the player count at `/status`.
+# Everything the browser needs lives behind one hostname and one certificate:
+#
+#   /              the static client, and the WebSocket game protocol
+#   /caches/*      the OSRS cache download
+#   /status        player count, polled by the login screen's server list
+#
+# The game protocol and the client's index.html share the `/` path, so they are
+# told apart by the Upgrade header rather than by URL.
+
 {
 	email {$TLS_EMAIL}
 }
@@ -13,12 +19,30 @@
 	@compressible not path /caches/*
 	encode @compressible zstd gzip
 
-	reverse_proxy game:43594 {
-		# A tick is 600ms and an idle player can send nothing for minutes.
-		# Without this the proxy drops healthy game connections.
-		transport http {
-			read_timeout 0
-			write_timeout 0
+	@websocket header Connection *Upgrade*
+	handle @websocket {
+		reverse_proxy game:43594 {
+			# A tick is 600ms and an idle player can send nothing for minutes.
+			# Without this the proxy drops healthy game connections.
+			transport http {
+				read_timeout 0
+				write_timeout 0
+			}
 		}
+	}
+
+	handle /caches/* {
+		reverse_proxy game:43594
+	}
+
+	handle /status {
+		reverse_proxy game:43594
+	}
+
+	# Single-page app: unknown paths resolve to index.html so client routing works.
+	handle {
+		root * /srv/client
+		try_files {path} /index.html
+		file_server
 	}
 }

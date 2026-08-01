@@ -1,20 +1,23 @@
-# Production stack for the game server.
+# Full production stack: game server, static client, and TLS.
 #
-# Caddy terminates TLS and reverse-proxies everything to the game server, so a
-# single public port (443) carries all three things the browser client needs:
+# One hostname and one certificate carry everything the browser needs:
 #
-#   wss://HOST/         game protocol (Caddy upgrades WebSockets automatically)
-#   https://HOST/caches/  OSRS cache download
-#   https://HOST/status   player count shown on the login server list
+#   https://HOST/          the game client
+#   wss://HOST/            game protocol
+#   https://HOST/caches/   OSRS cache download
+#   https://HOST/status    player count on the login screen's server list
 #
-# TLS matters: the client is served over HTTPS from Vercel, and browsers refuse
-# a plaintext ws:// connection from an HTTPS page.
+# Browsers refuse a plaintext ws:// connection from an HTTPS page, so TLS is
+# required rather than optional — Caddy handles it via Let's Encrypt.
 #
 #   cp .env.deploy.example .env.deploy && $EDITOR .env.deploy
 #   docker compose --env-file .env.deploy up -d --build
 #
-# First boot downloads the cache and builds collision data (10-20 min) into
-# named volumes; later restarts are immediate.
+# First boot downloads the OSRS cache and builds collision data (10-20 min)
+# into named volumes; later restarts are immediate.
+#
+# Hosting the client on a CDN (Vercel, Pages) instead? This stack still works
+# unchanged — see docs/deploy.md for the build-time variables the CDN needs.
 
 services:
     game:
@@ -38,11 +41,22 @@ services:
         expose:
             - "43594"
 
+    # client/Dockerfile compiles the bundle and its final stage IS a Caddy image
+    # with the bundle at /srv/client, so serving and building are one service.
+    #
+    # The game's hostname is baked into the bundle at build time (Create React
+    # App inlines REACT_APP_*), so changing GAME_DOMAIN needs `up -d --build`,
+    # not just a restart.
     caddy:
-        image: caddy:2-alpine
-        restart: unless-stopped
+        build:
+            context: .
+            dockerfile: client/Dockerfile
+            args:
+                GAME_DOMAIN: ${GAME_DOMAIN:?set GAME_DOMAIN in .env.deploy}
+                SERVER_NAME: ${SERVER_NAME:-xRSPS}
         depends_on:
             - game
+        restart: unless-stopped
         ports:
             - "80:80"
             - "443:443"
