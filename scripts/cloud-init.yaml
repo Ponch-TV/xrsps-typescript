@@ -1,0 +1,69 @@
+#cloud-config
+#
+# Paste this into Oracle's instance creation form so the VM deploys itself with
+# no SSH at all:
+#
+#   Create Instance -> Show advanced options -> Management -> User data
+#   -> Paste cloud-init script
+#
+# EDIT THE TWO VALUES IN `write_files` BELOW FIRST. The domain must already have
+# an A record pointing at the instance's public IP by the time cloud-init runs,
+# or Caddy cannot get a certificate — reserve the IP first, or re-run the
+# bootstrap by hand afterwards.
+#
+# Progress lands in /var/log/xrsps-setup.log on the instance. First boot takes
+# 10-20 minutes: client bundle, ~195MB OSRS cache, 2,869 collision regions.
+
+package_update: true
+package_upgrade: false
+
+packages:
+    - git
+    - curl
+    - ca-certificates
+
+write_files:
+    - path: /etc/xrsps.env
+      permissions: "0644"
+      content: |
+          # ---- EDIT THESE TWO LINES ----
+          GAME_DOMAIN=game.example.com
+          TLS_EMAIL=you@example.com
+          # ------------------------------
+          REPO_BRANCH=claude/osrs-wow-conversion-60s94z
+          CLONE_DIR=/opt/xrsps
+
+    - path: /usr/local/bin/xrsps-setup.sh
+      permissions: "0755"
+      content: |
+          #!/usr/bin/env bash
+          # Thin wrapper: load the config, then hand off to the repo's bootstrap
+          # script so there is only one copy of the real logic.
+          set -euo pipefail
+          set -a
+          . /etc/xrsps.env
+          set +a
+
+          BOOTSTRAP="https://raw.githubusercontent.com/Ponch-TV/xrsps-typescript/${REPO_BRANCH}/scripts/bootstrap-oracle.sh"
+
+          echo "[xrsps] starting at $(date -u)"
+          echo "[xrsps] domain=${GAME_DOMAIN}"
+
+          # cloud-init can beat DNS propagation to the punch; the bootstrap
+          # refuses to run without a resolving name, so wait for it here.
+          for _ in $(seq 1 60); do
+              if getent hosts "${GAME_DOMAIN}" >/dev/null 2>&1; then break; fi
+              echo "[xrsps] waiting for ${GAME_DOMAIN} to resolve..."
+              sleep 30
+          done
+
+          curl -fsSL "$BOOTSTRAP" -o /usr/local/bin/bootstrap-oracle.sh
+          chmod +x /usr/local/bin/bootstrap-oracle.sh
+          exec /usr/local/bin/bootstrap-oracle.sh "${GAME_DOMAIN}" "${TLS_EMAIL}"
+
+runcmd:
+    # Detached with setsid so a slow build cannot stall cloud-init past its
+    # timeout and get the whole run marked failed.
+    - setsid bash -c '/usr/local/bin/xrsps-setup.sh >>/var/log/xrsps-setup.log 2>&1' &
+
+final_message: "xRSPS provisioning started. Follow /var/log/xrsps-setup.log (10-20 min)."

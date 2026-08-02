@@ -52,6 +52,20 @@ curl -fsSL https://raw.githubusercontent.com/Ponch-TV/xrsps-typescript/claude/os
     | bash -s -- game.example.com you@example.com
 ```
 
+### Without touching SSH at all
+
+[`scripts/cloud-init.yaml`](https://github.com/Ponch-TV/xrsps-typescript/blob/claude/osrs-wow-conversion-60s94z/scripts/cloud-init.yaml)
+does the same thing from inside the instance on first boot. Edit the two values
+at the top, then while creating the instance:
+
+**Show advanced options → Management → User data → Paste cloud-init script**
+
+The VM provisions itself. Progress goes to `/var/log/xrsps-setup.log`.
+
+Reserve the public IP before you create the instance so you can set the A record
+in advance — cloud-init waits up to 30 minutes for the name to resolve, then
+gives up and you would have to re-run the bootstrap by hand.
+
 That opens the instance's local firewall, installs Docker, clones the repo,
 writes `.env.deploy`, builds, and waits until the server reports ready. It
 refuses to start on the 1GB shape and tells you if DNS is not pointing here yet.
