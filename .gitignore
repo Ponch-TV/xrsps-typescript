@@ -74,6 +74,15 @@ server/data/gamemodes/*/game.sqlite*
 !.env.example
 !.env.deploy.example
 
+# Key material — API signing keys, SSH keys, certificates. Never commit.
+*.pem
+*.key
+*.p12
+*.pfx
+oci_api_key*
+id_rsa*
+id_ed25519*
+
 server/data/sources/
 
 docs/node_modules/
