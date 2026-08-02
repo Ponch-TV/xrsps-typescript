@@ -26,10 +26,11 @@ write_files:
     - path: /etc/xrsps.env
       permissions: "0644"
       content: |
-          # ---- EDIT THESE TWO LINES ----
-          GAME_DOMAIN=game.example.com
+          # Leave GAME_DOMAIN empty to derive one from this instance's public IP
+          # via sslip.io, which needs no DNS setup at all. Set it to a real
+          # hostname once you have one pointed here.
+          GAME_DOMAIN=
           TLS_EMAIL=you@example.com
-          # ------------------------------
           REPO_BRANCH=claude/osrs-wow-conversion-60s94z
           CLONE_DIR=/opt/xrsps
 
@@ -47,10 +48,26 @@ write_files:
           BOOTSTRAP="https://raw.githubusercontent.com/Ponch-TV/xrsps-typescript/${REPO_BRANCH}/scripts/bootstrap-oracle.sh"
 
           echo "[xrsps] starting at $(date -u)"
+
+          # No domain configured: build one from our own public IP. sslip.io
+          # resolves <a-b-c-d>.sslip.io to a.b.c.d, so this needs no DNS setup
+          # and Let's Encrypt still issues a real certificate for it.
+          if [ -z "${GAME_DOMAIN:-}" ]; then
+              for _ in $(seq 1 20); do
+                  PUBLIC_IP="$(curl -fsS --max-time 10 https://api.ipify.org || true)"
+                  [ -n "$PUBLIC_IP" ] && break
+                  echo "[xrsps] waiting for outbound network..."
+                  sleep 15
+              done
+              [ -n "${PUBLIC_IP:-}" ] || { echo "[xrsps] no public IP; aborting"; exit 1; }
+              GAME_DOMAIN="${PUBLIC_IP//./-}.sslip.io"
+              echo "[xrsps] derived domain from public IP ${PUBLIC_IP}"
+          fi
+
           echo "[xrsps] domain=${GAME_DOMAIN}"
 
-          # cloud-init can beat DNS propagation to the punch; the bootstrap
-          # refuses to run without a resolving name, so wait for it here.
+          # A real domain may still be propagating; the bootstrap refuses to run
+          # without a resolving name, so wait for it here.
           for _ in $(seq 1 60); do
               if getent hosts "${GAME_DOMAIN}" >/dev/null 2>&1; then break; fi
               echo "[xrsps] waiting for ${GAME_DOMAIN} to resolve..."
